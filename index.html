@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1b5e20">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Diseñador de Riego</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#f4f7f2;color:#17321c}
+header{background:#1b5e20;color:#fff;padding:14px 16px;position:sticky;top:0;z-index:5}
+h1{font-size:20px;margin:0}.sub{font-size:12px;opacity:.85}
+nav{display:flex;background:#fff;border-bottom:1px solid #d7ded7;position:sticky;top:60px;z-index:4}
+nav button{flex:1;border:0;background:#fff;padding:12px 4px;font-weight:700;color:#31543a}
+nav button.active{color:#1b5e20;border-bottom:3px solid #1b5e20}
+main{padding:12px;max-width:900px;margin:auto}.panel{background:#fff;border:1px solid #dce5dc;border-radius:14px;padding:12px;margin-bottom:12px;box-shadow:0 1px 3px #0000000b}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row>*{flex:1}.btn{border:0;border-radius:10px;padding:10px 12px;background:#1b5e20;color:#fff;font-weight:700}.btn.secondary{background:#e8f0e8;color:#1b5e20}.btn.danger{background:#b3261e}.field{padding:9px;border:1px solid #b8c5b8;border-radius:9px;width:100%;font-size:15px}
+.small{font-size:12px;color:#5b6d5e}.hidden{display:none}.canvasWrap{height:55vh;min-height:340px;background:#edf4ea;border-radius:12px;overflow:hidden;border:1px solid #cdd8cd}.hint{background:#f0f7ee;padding:8px;border-radius:9px;font-size:13px}
+canvas{width:100%;height:100%;display:block;touch-action:none}
+.card{padding:11px;background:#f8faf8;border-radius:10px;margin:7px 0;border:1px solid #e0e7e0}
+.bad{color:#a3261e;font-weight:700}.good{color:#17652a;font-weight:700}
+#install{display:none;background:#ffca28;color:#382700;margin:8px 12px;padding:10px;border-radius:10px;font-weight:700}
+.stat{display:grid;grid-template-columns:1fr 1fr;gap:8px}.stat div{background:#f0f5ef;padding:10px;border-radius:10px}.stat b{display:block;font-size:18px}
+</style>
+</head>
+<body>
+<header><h1>Diseñador de Riego</h1><div class="sub">Planificación de riego para césped · V2 Web</div></header>
+<div id="install">Puedes instalar esta aplicación en Android desde el menú de Chrome → “Añadir a pantalla de inicio”.</div>
+<nav>
+<button class="active" data-tab="plano">Plano</button>
+<button data-tab="calculo">Cálculo</button>
+<button data-tab="materiales">Materiales</button>
+</nav>
+<main>
+<section id="plano">
+<div class="panel">
+<div class="row">
+<button class="btn" id="drawParcel">Dibujar parcela</button>
+<button class="btn secondary" id="addSprinkler">Añadir aspersor</button>
+<button class="btn secondary" id="addPipe">Dibujar tubería</button>
+</div>
+<div class="row" style="margin-top:8px">
+<button class="btn secondary" id="newZone">Nueva zona</button>
+<button class="btn secondary" id="undo">Deshacer</button>
+<button class="btn danger" id="clear">Limpiar</button>
+</div>
+<div class="row" style="margin-top:8px">
+<select class="field" id="sprType">
+<option value="ROTOR">Rotor 90° · 8 L/min · 7 m</option>
+<option value="SPRAY">Difusor 180° · 6 L/min · 4 m</option>
+<option value="FULL">Aspersor 360° · 12 L/min · 5 m</option>
+<option value="STRIP">Banda 180° · 4 L/min · 5 m</option>
+</select>
+<input class="field" id="pressure" type="number" step=".1" value="3" placeholder="Presión bar">
+<input class="field" id="flow" type="number" step="1" value="30" placeholder="Caudal L/min">
+</div>
+<p class="hint" id="status">Dibuja la parcela tocando puntos sobre el plano. Pulsa “Dibujar parcela” y toca varios vértices.</p>
+<div class="canvasWrap"><canvas id="plan"></canvas></div>
+</div>
+<div class="panel">
+<div class="stat">
+<div><span class="small">Superficie</span><b id="area">0 m²</b></div>
+<div><span class="small">Aspersores</span><b id="count">0</b></div>
+<div><span class="small">Zonas</span><b id="zones">0</b></div>
+<div><span class="small">Cobertura</span><b id="coverage">0%</b></div>
+</div>
+</div>
+</section>
+
+<section id="calculo" class="hidden">
+<div class="panel">
+<h3>Parámetros hidráulicos</h3>
+<div class="row">
+<label>Presión (bar)<input class="field" id="pressure2" type="number" step=".1" value="3"></label>
+<label>Caudal disponible (L/min)<input class="field" id="flow2" type="number" value="30"></label>
+</div>
+</div>
+<div id="zonesList" class="panel"></div>
+<div class="panel"><h3>Tubería</h3><div id="pipeResult"></div><p class="small">La selección de diámetro es preliminar. Debe verificarse con pérdidas de carga, longitud, desnivel y presión mínima del emisor.</p></div>
+</section>
+
+<section id="materiales" class="hidden">
+<div class="panel"><h3>Lista de materiales</h3><div id="materials"></div><button class="btn" id="export">Guardar proyecto</button></div>
+</section>
+</main>
+<script>
+const canvas=document.getElementById('plan'),ctx=canvas.getContext('2d');
+let mode='parcel',parcel=[],sprinklers=[],pipes=[],zone=1,undoStack=[];
+const types={
+ ROTOR:{name:'Rotor 90°',flow:8,r:7},SPRAY:{name:'Difusor 180°',flow:6,r:4},
+ FULL:{name:'Aspersor 360°',flow:12,r:5},STRIP:{name:'Banda 180°',flow:4,r:5}
+};
+const $=id=>document.getElementById(id);
+function resize(){const r=canvas.getBoundingClientRect(),d=devicePixelRatio||1;canvas.width=r.width*d;canvas.height=r.height*d;ctx.setTransform(d,0,0,d,0,0);draw()} addEventListener('resize',resize);
+function bounds(){let all=parcel.length?parcel:[{x:0,y:0},{x:20,y:12}],xs=all.map(p=>p.x),ys=all.map(p=>p.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);return {minX,maxX,minY,maxY}}
+function tr(){let b=bounds(),w=canvas.clientWidth,h=canvas.clientHeight,s=Math.min((w-30)/(b.maxX-b.minX||20),(h-30)/(b.maxY-b.minY||12));return {s,ox:(w-(b.maxX-b.minX)*s)/2-b.minX*s,oy:(h-(b.maxY-b.minY)*s)/2-b.minY*s}}
+function screen(p){let t=tr();return{x:t.ox+p.x*t.s,y:t.oy+p.y*t.s}}
+function world(x,y){let t=tr();return{x:(x-t.ox)/t.s,y:(y-t.oy)/t.s}}
+function draw(){
+ ctx.clearRect(0,0,canvas.clientWidth,canvas.clientHeight);ctx.fillStyle='#edf4ea';ctx.fillRect(0,0,canvas.clientWidth,canvas.clientHeight);
+ let t=tr(),b=bounds();
+ ctx.strokeStyle='#dbe5d9';ctx.lineWidth=1;
+ for(let x=Math.floor(b.minX)-1;x<=b.maxX+1;x++){let p=screen({x,y:b.minY-1});ctx.beginPath();ctx.moveTo(p.x,0);ctx.lineTo(p.x,canvas.clientHeight);ctx.stroke()}
+ for(let y=Math.floor(b.minY)-1;y<=b.maxY+1;y++){let p=screen({x:b.minX-1,y});ctx.beginPath();ctx.moveTo(0,p.y);ctx.lineTo(canvas.clientWidth,p.y);ctx.stroke()}
+ if(parcel.length){ctx.beginPath();parcel.forEach((p,i)=>{let q=screen(p);i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)});if(parcel.length>=3){ctx.closePath();ctx.fillStyle='#cfe5c9';ctx.fill()}ctx.strokeStyle='#2f6338';ctx.lineWidth=4;ctx.stroke();parcel.forEach(p=>{let q=screen(p);ctx.fillStyle='#2f6338';ctx.beginPath();ctx.arc(q.x,q.y,5,0,Math.PI*2);ctx.fill()})}
+ if(mode!=='parcel')sprinklers.forEach(s=>{let q=screen(s.p),type=types[s.type];ctx.fillStyle='#1976d233';ctx.beginPath();ctx.arc(q.x,q.y,type.r*t.s,0,Math.PI*2);ctx.fill();ctx.fillStyle='#1976d2';ctx.beginPath();ctx.arc(q.x,q.y,6,0,Math.PI*2);ctx.fill()});
+ pipes.forEach(p=>{let a=screen(p.a),b=screen(p.b);ctx.strokeStyle='#555';ctx.lineWidth=Math.max(3,p.d/5);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()});
+}
+function inside(pt,poly){let c=false,j=poly.length-1;for(let i=0;i<poly.length;i++){let a=poly[i],b=poly[j];if(((a.y>pt.y)!=(b.y>pt.y))&&pt.x<(b.x-a.x)*(pt.y-a.y)/(b.y-a.y)+a.x)c=!c;j=i}return c}
+function area(){let s=0;for(let i=0;i<parcel.length;i++){let a=parcel[i],b=parcel[(i+1)%parcel.length];s+=a.x*b.y-b.x*a.y}return Math.abs(s)/2}
+function coverage(){if(parcel.length<3||!sprinklers.length)return 0;let b=bounds(),step=.3,insideN=0,cov=0;for(let y=b.minY;y<=b.maxY;y+=step)for(let x=b.minX;x<=b.maxX;x+=step){let p={x,y};if(inside(p,parcel)){insideN++;if(sprinklers.some(s=>Math.hypot(s.p.x-x,s.p.y-y)<=types[s.type].r))cov++}}return insideN?100*cov/insideN:0}
+function update(){
+ $('area').textContent=area().toFixed(1)+' m²';$('count').textContent=sprinklers.length;$('zones').textContent=[...new Set(sprinklers.map(s=>s.zone))].length;$('coverage').textContent=coverage().toFixed(0)+'%';
+ let zs=[...new Set(sprinklers.map(s=>s.zone))].sort((a,b)=>a-b),avail=+$('flow2').value||+$('flow').value||0;
+ $('zonesList').innerHTML='<h3>Sectores</h3>'+ (zs.length?zs.map(z=>{let ss=sprinklers.filter(s=>s.zone===z),f=ss.reduce((a,s)=>a+types[s.type].flow,0);return `<div class="card"><b>Zona ${z}</b><br>${ss.length} emisores · ${f.toFixed(1)} L/min<br><span class="${f<=avail?'good':'bad'}">${f<=avail?'Dentro del caudal disponible':'Excede el caudal disponible'}</span></div>`}).join(''):'<p>No hay sectores todavía.</p>');
+ let maxf=Math.max(0,...zs.map(z=>sprinklers.filter(s=>s.zone===z).reduce((a,s)=>a+types[s.type].flow,0)));
+ let d=maxf<=12?20:maxf<=25?25:maxf<=45?32:maxf<=70?40:50;
+ let len=pipes.reduce((a,p)=>a+Math.hypot(p.a.x-p.b.x,p.a.y-p.b.y),0);
+ $('pipeResult').innerHTML=`Caudal máximo de sector: <b>${maxf.toFixed(1)} L/min</b><br>Diámetro preliminar: <b>Ø${d} mm</b><br>Tubería dibujada: <b>${len.toFixed(1)} m</b>`;
+ let mats=[['Aspersores / difusores',sprinklers.length],['Electroválvulas',zs.length],['Programador',zs.length?`1 (${zs.length} zonas)`:'1'],[`Tubería Ø${d} mm`,len.toFixed(1)+' m'],['Conexiones / derivaciones',sprinklers.length],['Cajas de válvulas',zs.length?Math.max(1,Math.ceil(zs.length/2)):0],['Tapón final',parcel.length>=3?1:0]];
+ $('materials').innerHTML=mats.map(x=>`<div class="card"><b>${x[0]}</b><span style="float:right">${x[1]}</span></div>`).join('');
+ draw();
+}
+function saveUndo(){undoStack.push(JSON.stringify({parcel,sprinklers,pipes,zone}));if(undoStack.length>30)undoStack.shift()}
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);let r=canvas.getBoundingClientRect(),p=world(e.clientX-r.left,e.clientY-r.top);saveUndo();
+ if(mode==='parcel'){parcel.push(p);$('status').textContent=`Punto ${parcel.length}: ${p.x.toFixed(1)}, ${p.y.toFixed(1)} m`}
+ else if(mode==='aspersor'){if(parcel.length>=3&&inside(p,parcel)){let type=$('sprType').value;sprinklers.push({p,type,zone});$('status').textContent=`${types[type].name} añadido en zona ${zone}`}else $('status').textContent='Coloca el aspersor dentro de la parcela.'}
+ else {if(parcel.length>=3&&inside(p,parcel)){let prev=pipes.length?pipes[pipes.length-1].b:{x:0,y:0};pipes.push({a:prev,b:p,d:32});$('status').textContent='Tramo de tubería añadido.'}}
+ update()});
+$('drawParcel').onclick=()=>{mode='parcel';$('status').textContent='Toca los vértices de la parcela. Cuando termines, pulsa otra herramienta.'};
+$('addSprinkler').onclick=()=>{mode='aspersor';$('status').textContent='Toca dentro de la parcela para colocar aspersores.'};
+$('addPipe').onclick=()=>{mode='tuberia';$('status').textContent='Toca puntos para dibujar la tubería.'};
+$('newZone').onclick=()=>{zone++;mode='aspersor';$('status').textContent=`Zona ${zone} activa.`};
+$('undo').onclick=()=>{let x=undoStack.pop();if(x){({parcel,sprinklers,pipes,zone}=JSON.parse(x));update()}};
+$('clear').onclick=()=>{saveUndo();parcel=[];sprinklers=[];pipes=[];zone=1;update()};
+$('flow').oninput=()=>{$('flow2').value=$('flow').value;update()};$('pressure').oninput=()=>{$('pressure2').value=$('pressure').value};
+$('flow2').oninput=()=>{$('flow').value=$('flow2').value;update()};$('pressure2').oninput=()=>{$('pressure').value=$('pressure2').value};
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');['plano','calculo','materiales'].forEach(id=>$(id).classList.add('hidden'));$(b.dataset.tab).classList.remove('hidden');update()});
+$('export').onclick=()=>{let data={version:2,parcel,sprinklers,pipes,zone,pressure:+$('pressure').value,flow:+$('flow').value};let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download='proyecto-riego.json';a.click()};
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');
+resize();update();
+</script>
+</body></html>

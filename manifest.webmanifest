@@ -1,0 +1,17 @@
+{
+  "name": "Diseñador de Riego",
+  "short_name": "Riego",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f4f7f2",
+  "theme_color": "#1b5e20",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
